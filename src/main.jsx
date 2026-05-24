@@ -549,11 +549,6 @@ function App() {
   });
 
   useEffect(() => {
-    const channel = Math.round(clamp(toneLevel, 0, 1) * 255);
-    document.documentElement.style.setProperty('--tone-bg', `rgb(${channel} ${channel} ${channel})`);
-  }, [toneLevel]);
-
-  useEffect(() => {
     let frame;
     const tick = () => {
       if (isRunning) setElapsed(audio.getElapsed());
@@ -591,7 +586,7 @@ function App() {
   };
 
   return (
-    <main className="appShell" style={{ '--tone-level': toneLevel }}>
+    <main className="appShell">
       <header className="topBar">
         <div className="brand">
           <button className="iconButton" aria-label="Menu"><Menu size={22} /></button>
@@ -703,7 +698,7 @@ function App() {
           <button className="resetButton" onClick={reset}>Reset Session</button>
         </aside>
 
-        <section className="mainPanel">
+        <section className="mainPanel" style={{ '--tone-fill': `${clamp(toneLevel, 0, 1) * 100}%` }}>
           <div className="statsStrip">
             <div><span>Elapsed</span><strong>{formatTime(elapsed)}</strong></div>
             <div><span>Phase</span><strong>{phase}</strong></div>
