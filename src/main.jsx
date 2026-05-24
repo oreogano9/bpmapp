@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const BPM_MIN = 1;
+const BPM_MIN = 0.05;
 const BPM_MAX = 500;
 const DURATION_MIN = 10;
 const DURATION_MAX = 3600;
@@ -65,6 +65,33 @@ const curveTypes = [
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function formatBpm(value) {
+  if (value < 1) return value.toFixed(2);
+  if (value < 10) return value.toFixed(2).replace(/\.?0+$/, '');
+  if (value < 100) return value.toFixed(1).replace(/\.0$/, '');
+  return Math.round(value).toString();
+}
+
+function normalizeBpm(value) {
+  const safe = clamp(Number(value) || BPM_MIN, BPM_MIN, BPM_MAX);
+  const step = safe < 10 ? 0.01 : safe < 100 ? 0.1 : 1;
+  return clamp(Number((Math.round(safe / step) * step).toFixed(2)), BPM_MIN, BPM_MAX);
+}
+
+function toSliderValue(value, min, max, scale) {
+  if (scale !== 'log') return value;
+  const minLog = Math.log(min);
+  const maxLog = Math.log(max);
+  return ((Math.log(clamp(value, min, max)) - minLog) / (maxLog - minLog)) * 1000;
+}
+
+function fromSliderValue(value, min, max, scale) {
+  if (scale !== 'log') return Number(value);
+  const minLog = Math.log(min);
+  const maxLog = Math.log(max);
+  return Math.exp(minLog + (Number(value) / 1000) * (maxLog - minLog));
 }
 
 function formatTime(seconds) {
@@ -132,7 +159,7 @@ function getContinuousPitchMultiplier(beatPhase, pitchMode, patternLength) {
 }
 
 function getPitchVolumeMultiplier(pitchMultiplier) {
-  return pitchMultiplier < 1 ? 0.8 : 1;
+  return 0.2 + getToneLevelFromMultiplier(pitchMultiplier) * 0.8;
 }
 
 function getToneLevelFromMultiplier(pitchMultiplier) {
@@ -366,21 +393,22 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
   return useMemo(() => ({ getElapsed, seek, reset, ensureAudio }), [getElapsed, seek, reset, ensureAudio]);
 }
 
-function NumberStepper({ value, min, max, onChange }) {
+function NumberStepper({ value, min, max, onChange, step = 1, display = value }) {
   return (
     <div className="stepper" aria-label="BPM stepper">
       <input
         type="number"
         min={min}
         max={max}
-        value={value}
+        step={step}
+        value={display}
         onChange={(event) => onChange(clamp(Number(event.target.value), min, max))}
       />
       <div className="stepperButtons">
-        <button type="button" aria-label="Increase" onClick={() => onChange(clamp(value + 1, min, max))}>
+        <button type="button" aria-label="Increase" onClick={() => onChange(clamp(value + step, min, max))}>
           <ChevronUp size={14} />
         </button>
-        <button type="button" aria-label="Decrease" onClick={() => onChange(clamp(value - 1, min, max))}>
+        <button type="button" aria-label="Decrease" onClick={() => onChange(clamp(value - step, min, max))}>
           <ChevronDown size={14} />
         </button>
       </div>
@@ -388,7 +416,8 @@ function NumberStepper({ value, min, max, onChange }) {
   );
 }
 
-function SliderRow({ label, value, min, max, accent, onChange, display }) {
+function SliderRow({ label, value, min, max, accent, onChange, display, scale = 'linear', step = 1, format = (item) => item }) {
+  const sliderValue = toSliderValue(value, min, max, scale);
   return (
     <label className="sliderRow">
       {label ? (
@@ -400,14 +429,15 @@ function SliderRow({ label, value, min, max, accent, onChange, display }) {
       <input
         style={{ '--accent': accent }}
         type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        min={scale === 'log' ? 0 : min}
+        max={scale === 'log' ? 1000 : max}
+        step={scale === 'log' ? 1 : step}
+        value={sliderValue}
+        onChange={(event) => onChange(fromSliderValue(event.target.value, min, max, scale))}
       />
       <div className="rangeLimits">
-        <span>{min}</span>
-        <span>{max}</span>
+        <span>{format(min)}</span>
+        <span>{format(max)}</span>
       </div>
     </label>
   );
@@ -418,8 +448,8 @@ function TempoDial({ bpm, progress, pulse, pattern, beatIndex, startBpm, targetB
   return (
     <section className="dialPanel" aria-label="Current tempo visualization">
       <div className="dialReadouts">
-        <span>Start <strong>{startBpm}</strong></span>
-        <span>Target <strong>{targetBpm}</strong></span>
+        <span>Start <strong>{formatBpm(startBpm)}</strong></span>
+        <span>Target <strong>{formatBpm(targetBpm)}</strong></span>
       </div>
       <div className="dial" style={{ '--progress': progress, '--pulse': pulse }}>
         {Array.from({ length: ticks }).map((_, index) => {
@@ -429,7 +459,7 @@ function TempoDial({ bpm, progress, pulse, pattern, beatIndex, startBpm, targetB
         })}
         <div className="dialCore">
           <span>Current BPM</span>
-          <strong>{bpm.toFixed(1)}</strong>
+          <strong>{formatBpm(bpm)}</strong>
           <small>{pattern.label}</small>
           <div className="beatDots" aria-label="Beat position">
             {pattern.beats.map((accent, index) => (
@@ -520,6 +550,8 @@ function App() {
   const total = mode === 'oscillate' ? duration * 2 : duration;
   const progress = getProgress(elapsed, mode, duration);
   const phase = mode === 'linear' ? (elapsed >= duration ? 'Complete' : 'Ramping Up') : progress < 0.5 ? 'Ramping Up' : 'Ramping Down';
+  const setNormalizedStartBpm = useCallback((value) => setStartBpm(normalizeBpm(value)), []);
+  const setNormalizedTargetBpm = useCallback((value) => setTargetBpm(normalizeBpm(value)), []);
 
   const onBeat = useCallback((index, accent, beatElapsed) => {
     setBeatIndex(index);
@@ -611,8 +643,8 @@ function App() {
       const gaps = tapTimes.current.slice(1).map((time, index) => time - tapTimes.current[index]);
       const average = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
       const tapped = clamp(Math.round(60000 / average), BPM_MIN, BPM_MAX);
-      setStartBpm(tapped);
-      if (targetBpm < tapped) setTargetBpm(tapped);
+      setNormalizedStartBpm(tapped);
+      if (targetBpm < tapped) setNormalizedTargetBpm(tapped);
     }
   };
 
@@ -650,17 +682,17 @@ function App() {
           <div className="controlGroup">
             <div className="controlLine">
               <span>{mode === 'linear' ? 'Start BPM' : 'Min BPM'}</span>
-              <NumberStepper value={startBpm} min={BPM_MIN} max={BPM_MAX} onChange={setStartBpm} />
+              <NumberStepper value={startBpm} min={BPM_MIN} max={BPM_MAX} step={0.05} display={formatBpm(startBpm)} onChange={setNormalizedStartBpm} />
             </div>
-            <SliderRow label="" value={startBpm} min={BPM_MIN} max={BPM_MAX} accent="#2f80ff" onChange={setStartBpm} />
+            <SliderRow label="" value={startBpm} min={BPM_MIN} max={BPM_MAX} accent="#2f80ff" scale="log" format={formatBpm} onChange={setNormalizedStartBpm} />
           </div>
 
           <div className="controlGroup">
             <div className="controlLine">
               <span>{mode === 'linear' ? 'Target BPM' : 'Max BPM'}</span>
-              <NumberStepper value={targetBpm} min={BPM_MIN} max={BPM_MAX} onChange={setTargetBpm} />
+              <NumberStepper value={targetBpm} min={BPM_MIN} max={BPM_MAX} step={0.05} display={formatBpm(targetBpm)} onChange={setNormalizedTargetBpm} />
             </div>
-            <SliderRow label="" value={targetBpm} min={BPM_MIN} max={BPM_MAX} accent="#2dd4bf" onChange={setTargetBpm} />
+            <SliderRow label="" value={targetBpm} min={BPM_MIN} max={BPM_MAX} accent="#2dd4bf" scale="log" format={formatBpm} onChange={setNormalizedTargetBpm} />
           </div>
 
           <div className="controlGroup">
