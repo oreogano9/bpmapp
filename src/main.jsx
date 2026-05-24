@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const BPM_MIN = 0.05;
+const BPM_MIN = 0.001;
 const BPM_MAX = 500;
 const DURATION_MIN = 10;
 const DURATION_MAX = 3600;
@@ -68,6 +68,7 @@ function clamp(value, min, max) {
 }
 
 function formatBpm(value) {
+  if (value < 0.01) return value.toFixed(3);
   if (value < 1) return value.toFixed(2);
   if (value < 10) return value.toFixed(2).replace(/\.?0+$/, '');
   if (value < 100) return value.toFixed(1).replace(/\.0$/, '');
@@ -76,8 +77,8 @@ function formatBpm(value) {
 
 function normalizeBpm(value) {
   const safe = clamp(Number(value) || BPM_MIN, BPM_MIN, BPM_MAX);
-  const step = safe < 10 ? 0.01 : safe < 100 ? 0.1 : 1;
-  return clamp(Number((Math.round(safe / step) * step).toFixed(2)), BPM_MIN, BPM_MAX);
+  const step = safe < 0.01 ? 0.001 : safe < 10 ? 0.01 : safe < 100 ? 0.1 : 1;
+  return clamp(Number((Math.round(safe / step) * step).toFixed(3)), BPM_MIN, BPM_MAX);
 }
 
 function toSliderValue(value, min, max, scale) {
@@ -682,7 +683,7 @@ function App() {
           <div className="controlGroup">
             <div className="controlLine">
               <span>{mode === 'linear' ? 'Start BPM' : 'Min BPM'}</span>
-              <NumberStepper value={startBpm} min={BPM_MIN} max={BPM_MAX} step={0.05} display={formatBpm(startBpm)} onChange={setNormalizedStartBpm} />
+              <NumberStepper value={startBpm} min={BPM_MIN} max={BPM_MAX} step={0.001} display={formatBpm(startBpm)} onChange={setNormalizedStartBpm} />
             </div>
             <SliderRow label="" value={startBpm} min={BPM_MIN} max={BPM_MAX} accent="#2f80ff" scale="log" format={formatBpm} onChange={setNormalizedStartBpm} />
           </div>
@@ -690,7 +691,7 @@ function App() {
           <div className="controlGroup">
             <div className="controlLine">
               <span>{mode === 'linear' ? 'Target BPM' : 'Max BPM'}</span>
-              <NumberStepper value={targetBpm} min={BPM_MIN} max={BPM_MAX} step={0.05} display={formatBpm(targetBpm)} onChange={setNormalizedTargetBpm} />
+              <NumberStepper value={targetBpm} min={BPM_MIN} max={BPM_MAX} step={0.001} display={formatBpm(targetBpm)} onChange={setNormalizedTargetBpm} />
             </div>
             <SliderRow label="" value={targetBpm} min={BPM_MIN} max={BPM_MAX} accent="#2dd4bf" scale="log" format={formatBpm} onChange={setNormalizedTargetBpm} />
           </div>
