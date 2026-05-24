@@ -143,9 +143,9 @@ function getPitchMultiplier(beatIndex, pitchMode, patternLength) {
   if (pitchMode === 'sine-wave') {
     const cycle = Math.max(4, patternLength);
     const phase = (beatIndex % cycle) / cycle;
-    return 1 + Math.sin(phase * Math.PI * 2) * 0.55;
+    return 1 - Math.cos(phase * Math.PI * 2) * 0.55;
   }
-  if (pitchMode === 'alternate') return beatIndex % 2 === 0 ? 1.55 : 0.58;
+  if (pitchMode === 'alternate') return beatIndex % 2 === 0 ? 0.58 : 1.55;
   if (pitchMode === 'ladder') return 0.58 + ((beatIndex % patternLength) / Math.max(1, patternLength - 1)) * 0.97;
   return 1;
 }
@@ -153,8 +153,8 @@ function getPitchMultiplier(beatIndex, pitchMode, patternLength) {
 function getContinuousPitchMultiplier(beatPhase, pitchMode, patternLength) {
   const cycle = Math.max(4, patternLength);
   const wrapped = ((beatPhase % cycle) + cycle) % cycle;
-  if (pitchMode === 'sine-wave') return 1 + Math.sin(beatPhase * Math.PI * 2) * 0.55;
-  if (pitchMode === 'alternate') return Math.floor(beatPhase) % 2 === 0 ? 1.55 : 0.58;
+  if (pitchMode === 'sine-wave') return 1 - Math.cos(beatPhase * Math.PI * 2) * 0.55;
+  if (pitchMode === 'alternate') return Math.floor(beatPhase) % 2 === 0 ? 0.58 : 1.55;
   if (pitchMode === 'ladder') return 0.58 + (wrapped / cycle) * 0.97;
   return 1;
 }
@@ -165,6 +165,35 @@ function getPitchVolumeMultiplier(pitchMultiplier) {
 
 function getToneLevelFromMultiplier(pitchMultiplier) {
   return clamp((pitchMultiplier - 0.45) / 1.1, 0, 1);
+}
+
+function getBeatPhaseAtElapsed(elapsed, mode, startBpm, targetBpm, duration, curveAmount, curveType) {
+  const safeElapsed = Math.max(0, elapsed);
+  if (safeElapsed === 0) return 0;
+  const steps = clamp(Math.ceil(safeElapsed * 4), 16, 360);
+  const stepSize = safeElapsed / steps;
+  let phase = 0;
+  for (let index = 0; index < steps; index += 1) {
+    const sampleElapsed = (index + 0.5) * stepSize;
+    const bpm = getTempoAt(sampleElapsed, mode, startBpm, targetBpm, duration, curveAmount, curveType);
+    phase += (bpm / 60) * stepSize;
+  }
+  return phase;
+}
+
+function getToneLevelAtElapsed(elapsed, settings) {
+  if (!isContinuousProfile(settings.profile)) return 0;
+  const phase = getBeatPhaseAtElapsed(
+    elapsed,
+    settings.mode,
+    settings.startBpm,
+    settings.targetBpm,
+    settings.duration,
+    settings.curveAmount,
+    settings.curveType
+  );
+  const multiplier = getContinuousPitchMultiplier(phase, settings.pitchMode, settings.pattern.beats.length);
+  return getToneLevelFromMultiplier(multiplier);
 }
 
 function isContinuousProfile(profile) {
@@ -281,13 +310,14 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
     if (!e.continuous) {
       const osc = e.context.createOscillator();
       const gain = e.context.createGain();
+      const initialMultiplier = getContinuousPitchMultiplier(e.pitchPhase, s.pitchMode, s.pattern.beats.length);
       osc.type = getToneWaveform(s.profile);
-      osc.frequency.value = 520;
+      osc.frequency.value = 520 * initialMultiplier;
       gain.gain.value = 0.0001;
       osc.connect(gain);
       gain.connect(e.master);
       osc.start(now);
-      gain.gain.setTargetAtTime(s.profile === 'tone-sine' ? 0.34 : 0.24, now, 0.035);
+      gain.gain.setTargetAtTime((s.profile === 'tone-sine' ? 0.34 : 0.24) * getPitchVolumeMultiplier(initialMultiplier), now, 0.035);
       e.continuous = { osc, gain };
       e.lastContinuousAt = now;
     } else {
@@ -312,7 +342,15 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
     e.startedAtAudio = contextTime;
     e.nextBeatTime = contextTime + 0.03;
     e.beatIndex = Math.floor(e.pausedElapsed / Math.max(0.12, 60 / getTempoAt(e.pausedElapsed, settings.current.mode, settings.current.startBpm, settings.current.targetBpm, settings.current.duration, settings.current.curveAmount, settings.current.curveType)));
-    e.pitchPhase = e.beatIndex;
+    e.pitchPhase = getBeatPhaseAtElapsed(
+      e.pausedElapsed,
+      settings.current.mode,
+      settings.current.startBpm,
+      settings.current.targetBpm,
+      settings.current.duration,
+      settings.current.curveAmount,
+      settings.current.curveType
+    );
     e.lastContinuousAt = contextTime;
   }, []);
 
@@ -434,6 +472,7 @@ function SliderRow({ label, value, min, max, accent, onChange, display, scale = 
         max={scale === 'log' ? 1000 : max}
         step={scale === 'log' ? 1 : step}
         value={sliderValue}
+        onInput={(event) => onChange(fromSliderValue(event.target.value, min, max, scale))}
         onChange={(event) => onChange(fromSliderValue(event.target.value, min, max, scale))}
       />
       <div className="rangeLimits">
@@ -523,8 +562,8 @@ function RampCurve({ mode, startBpm, targetBpm, duration, elapsed, curveAmount, 
 
 function App() {
   const [mode, setMode] = useState('oscillate');
-  const [startBpm, setStartBpm] = useState(1);
-  const [targetBpm, setTargetBpm] = useState(309);
+  const [startBpm, setStartBpm] = useState(0.001);
+  const [targetBpm, setTargetBpm] = useState(270);
   const [duration, setDuration] = useState(598);
   const [curveAmount, setCurveAmount] = useState(100);
   const [curveType, setCurveType] = useState('expo');
@@ -540,8 +579,6 @@ function App() {
   const mainPanelRef = useRef(null);
   const toneBarRef = useRef(null);
   const toneTextRef = useRef(null);
-  const visualFrameAt = useRef(0);
-  const visualPitchPhase = useRef(0);
   const elapsedReadoutAt = useRef(0);
   const pulseReadoutAt = useRef(0);
   const elapsedRef = useRef(0);
@@ -583,11 +620,17 @@ function App() {
     onComplete
   });
 
+  const paintToneLevel = useCallback((level) => {
+    const clampedTone = clamp(level, 0, 1);
+    const tonePercent = `${clampedTone * 100}%`;
+    mainPanelRef.current?.style.setProperty('--tone-scale', clampedTone.toFixed(4));
+    if (toneBarRef.current) toneBarRef.current.style.height = tonePercent;
+    if (toneTextRef.current) toneTextRef.current.textContent = `${Math.round(clampedTone * 100)}%`;
+  }, []);
+
   useEffect(() => {
     let frame;
     const tick = (now) => {
-      const dt = visualFrameAt.current ? Math.max(0, (now - visualFrameAt.current) / 1000) : 0;
-      visualFrameAt.current = now;
       const nextElapsed = isRunning ? audio.getElapsed() : elapsedRef.current;
       if (isRunning) {
         elapsedRef.current = nextElapsed;
@@ -600,31 +643,40 @@ function App() {
         pulseReadoutAt.current = now;
         setPulse((value) => value * 0.68);
       }
-      let nextToneLevel = 0;
-      if (isRunning && isContinuousProfile(profileId)) {
-        const bpm = getTempoAt(nextElapsed, mode, startBpm, targetBpm, duration, curveAmount, curveType);
-        visualPitchPhase.current += dt * (bpm / 60);
-        const multiplier = getContinuousPitchMultiplier(visualPitchPhase.current, pitchMode, pattern.beats.length);
-        nextToneLevel = getToneLevelFromMultiplier(multiplier);
-      } else {
-        visualPitchPhase.current = 0;
-      }
-      const clampedTone = clamp(nextToneLevel, 0, 1);
-      const tonePercent = `${clampedTone * 100}%`;
-      mainPanelRef.current?.style.setProperty('--tone-scale', clampedTone.toFixed(4));
-      if (toneBarRef.current) toneBarRef.current.style.height = tonePercent;
-      if (toneTextRef.current) toneTextRef.current.textContent = `${Math.round(clampedTone * 100)}%`;
+      const nextToneLevel = getToneLevelAtElapsed(nextElapsed, {
+        mode,
+        startBpm,
+        targetBpm,
+        duration,
+        curveAmount,
+        curveType,
+        profile: profileId,
+        pitchMode,
+        pattern
+      });
+      paintToneLevel(nextToneLevel);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [audio, curveAmount, curveType, duration, isRunning, mode, pattern.beats.length, pitchMode, profileId, startBpm, targetBpm]);
+  }, [audio, curveAmount, curveType, duration, isRunning, mode, paintToneLevel, pattern, pitchMode, profileId, startBpm, targetBpm]);
 
   const seekToProgress = (value) => {
     const nextElapsed = (Number(value) / 1000) * total;
     audio.seek(nextElapsed);
     elapsedRef.current = nextElapsed;
     setElapsed(nextElapsed);
+    paintToneLevel(getToneLevelAtElapsed(nextElapsed, {
+      mode,
+      startBpm,
+      targetBpm,
+      duration,
+      curveAmount,
+      curveType,
+      profile: profileId,
+      pitchMode,
+      pattern
+    }));
   };
 
   const reset = () => {
@@ -632,7 +684,7 @@ function App() {
     audio.reset();
     elapsedRef.current = 0;
     setElapsed(0);
-    visualPitchPhase.current = 0;
+    paintToneLevel(0);
     setBeatIndex(0);
   };
 
@@ -779,7 +831,15 @@ function App() {
 
           <div className="scrubBar">
             <span>{formatTime(elapsed)}</span>
-            <input type="range" min="0" max="1000" value={Math.round(progress * 1000)} onChange={(event) => seekToProgress(event.target.value)} aria-label="Scrub playback position" />
+            <input
+              type="range"
+              min="0"
+              max="1000"
+              value={Math.round(progress * 1000)}
+              onInput={(event) => seekToProgress(event.target.value)}
+              onChange={(event) => seekToProgress(event.target.value)}
+              aria-label="Scrub playback position"
+            />
             <span>{formatTime(total)}</span>
           </div>
         </section>
