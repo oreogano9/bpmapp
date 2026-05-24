@@ -141,7 +141,7 @@ button {
 }
 
 .mainPanel {
-  --tone-fill: 0%;
+  --tone-scale: 0;
   position: relative;
   min-height: calc(100vh - 56px);
   padding: 8px 12px;
@@ -156,10 +156,11 @@ button {
 .mainPanel::before {
   content: "";
   position: absolute;
-  inset: auto 0 0;
-  height: var(--tone-fill);
+  inset: 0;
   background: #fff;
-  transition: height 70ms linear;
+  transform: scaleY(var(--tone-scale));
+  transform-origin: bottom;
+  will-change: transform;
   z-index: 0;
 }
 
@@ -513,7 +514,7 @@ input[type="range"]::-webkit-slider-thumb {
   min-height: 2px;
   border-radius: inherit;
   background: linear-gradient(180deg, #fff, #20c7f7 62%, #111);
-  transition: height 35ms linear;
+  will-change: height;
 }
 
 .dialPanel {
@@ -728,7 +729,8 @@ input[type="range"]::-webkit-slider-thumb {
   }
 
   .mainPanel {
-    min-height: auto;
+    min-height: calc(100dvh - 74px);
+    grid-template-rows: auto minmax(190px, 1fr) auto auto;
   }
 
   .controlPanel {
@@ -766,13 +768,27 @@ input[type="range"]::-webkit-slider-thumb {
   }
 
   .statsStrip {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(4, 1fr);
   }
 
   .statsStrip div {
-    min-height: 58px;
+    min-height: 46px;
+    gap: 3px;
+    border-right: 1px solid rgba(255, 255, 255, 0.09);
+    border-bottom: 0;
+  }
+
+  .statsStrip div:last-child {
     border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  .statsStrip span {
+    font-size: 0.58rem;
+  }
+
+  .statsStrip strong,
+  .statsStrip div:nth-child(2) strong {
+    font-size: clamp(0.62rem, 3vw, 0.88rem);
   }
 
   .profileGrid {
@@ -784,7 +800,7 @@ input[type="range"]::-webkit-slider-thumb {
   }
 
   .dial {
-    width: min(82vw, 340px);
+    width: min(68vw, 290px);
   }
 
   .dialCore strong {
@@ -792,6 +808,23 @@ input[type="range"]::-webkit-slider-thumb {
   }
 
   .curvePanel svg {
-    height: 140px;
+    height: 78px;
+  }
+
+  .mainPanel {
+    height: calc(100dvh - 122px);
+    min-height: 0;
+    padding: 8px;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .dialPanel {
+    min-height: 0;
+  }
+
+  .scrubBar {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.78rem;
   }
 }
