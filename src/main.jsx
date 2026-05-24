@@ -134,6 +134,10 @@ function getPitchVolumeMultiplier(pitchMultiplier) {
   return pitchMultiplier < 1 ? 0.8 : 1;
 }
 
+function getToneLevelFromMultiplier(pitchMultiplier) {
+  return clamp((pitchMultiplier - 0.45) / 1.1, 0, 1);
+}
+
 function isContinuousProfile(profile) {
   return profile.startsWith('tone-');
 }
@@ -184,7 +188,7 @@ function playClick(context, destination, profile, accent, pitchMultiplier = 1) {
   osc.stop(now + (profile === 'soft' ? 0.1 : 0.045));
 }
 
-function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onComplete }) {
+function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onTone, onComplete }) {
   const engine = useRef({
     context: null,
     master: null,
@@ -199,13 +203,13 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
     running: false
   });
 
-  const settings = useRef({ startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onComplete });
+  const settings = useRef({ startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onTone, onComplete });
   useEffect(() => {
-    settings.current = { startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onComplete };
+    settings.current = { startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onTone, onComplete };
     if (engine.current.master) {
       engine.current.master.gain.setTargetAtTime(volume, engine.current.context.currentTime, 0.015);
     }
-  }, [startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onComplete]);
+  }, [startBpm, targetBpm, duration, mode, curveAmount, curveType, profile, pattern, pitchMode, volume, onBeat, onTone, onComplete]);
 
   const ensureAudio = useCallback(async () => {
     if (!engine.current.context) {
@@ -241,6 +245,7 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
     if (!e.context) return;
     if (!isContinuousProfile(s.profile)) {
       stopContinuousTone(e);
+      s.onTone?.(0);
       return;
     }
 
@@ -268,8 +273,10 @@ function useAudioEngine({ isRunning, startBpm, targetBpm, duration, mode, curveA
     e.lastContinuousAt = now;
 
     const multiplier = getContinuousPitchMultiplier(e.pitchPhase, s.pitchMode, s.pattern.beats.length);
+    const toneLevel = getToneLevelFromMultiplier(multiplier);
     e.continuous.osc.frequency.setTargetAtTime(520 * multiplier, now, 0.025);
     e.continuous.gain.gain.setTargetAtTime((s.profile === 'tone-sine' ? 0.34 : 0.24) * getPitchVolumeMultiplier(multiplier), now, 0.035);
+    s.onTone?.(toneLevel);
   }, [stopContinuousTone]);
 
   const seek = useCallback((elapsed) => {
@@ -486,19 +493,20 @@ function RampCurve({ mode, startBpm, targetBpm, duration, elapsed, curveAmount, 
 }
 
 function App() {
-  const [mode, setMode] = useState('linear');
-  const [startBpm, setStartBpm] = useState(80);
-  const [targetBpm, setTargetBpm] = useState(160);
-  const [duration, setDuration] = useState(120);
-  const [curveAmount, setCurveAmount] = useState(75);
-  const [curveType, setCurveType] = useState('smoothstep');
-  const [profileId, setProfileId] = useState('classic');
+  const [mode, setMode] = useState('oscillate');
+  const [startBpm, setStartBpm] = useState(1);
+  const [targetBpm, setTargetBpm] = useState(309);
+  const [duration, setDuration] = useState(598);
+  const [curveAmount, setCurveAmount] = useState(100);
+  const [curveType, setCurveType] = useState('expo');
+  const [profileId, setProfileId] = useState('tone-sine');
   const [patternId, setPatternId] = useState('four');
-  const [pitchMode, setPitchMode] = useState('fixed');
+  const [pitchMode, setPitchMode] = useState('sine-wave');
   const [volume, setVolume] = useState(0.75);
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [pulse, setPulse] = useState(0);
+  const [toneLevel, setToneLevel] = useState(0);
   const [beatIndex, setBeatIndex] = useState(0);
   const tapTimes = useRef([]);
 
@@ -519,6 +527,10 @@ function App() {
     setElapsed(duration);
   }, [duration]);
 
+  const onTone = useCallback((level) => {
+    setToneLevel(level);
+  }, []);
+
   const audio = useAudioEngine({
     isRunning,
     startBpm,
@@ -532,8 +544,14 @@ function App() {
     pitchMode,
     volume,
     onBeat,
+    onTone,
     onComplete
   });
+
+  useEffect(() => {
+    const channel = Math.round(clamp(toneLevel, 0, 1) * 255);
+    document.documentElement.style.setProperty('--tone-bg', `rgb(${channel} ${channel} ${channel})`);
+  }, [toneLevel]);
 
   useEffect(() => {
     let frame;
@@ -573,7 +591,7 @@ function App() {
   };
 
   return (
-    <main className="appShell">
+    <main className="appShell" style={{ '--tone-level': toneLevel }}>
       <header className="topBar">
         <div className="brand">
           <button className="iconButton" aria-label="Menu"><Menu size={22} /></button>
@@ -690,6 +708,11 @@ function App() {
             <div><span>Elapsed</span><strong>{formatTime(elapsed)}</strong></div>
             <div><span>Phase</span><strong>{phase}</strong></div>
             <div><span>Remaining</span><strong>{formatTime(mode === 'linear' ? duration - elapsed : total - (elapsed % total))}</strong></div>
+            <div className="toneStat">
+              <span>Tone</span>
+              <strong>{Math.round(toneLevel * 100)}%</strong>
+              <i aria-hidden="true"><b style={{ height: `${clamp(toneLevel, 0, 1) * 100}%` }} /></i>
+            </div>
           </div>
 
           <TempoDial bpm={currentBpm} progress={progress} pulse={pulse} pattern={pattern} beatIndex={beatIndex} startBpm={startBpm} targetBpm={targetBpm} />
