@@ -25,6 +25,7 @@ const BPM_MIN = 1;
 const BPM_MAX = 500;
 const DURATION_MIN = 10;
 const DURATION_MAX = 3600;
+const CURVE_AMOUNT_MAX = 250;
 
 const profiles = [
   { id: 'classic', label: 'Classic', icon: Speaker },
@@ -89,7 +90,7 @@ function shapeProgress(progress, curveAmount, curveType) {
   const p = clamp(progress, 0, 1);
   const amount = curveAmount / 100;
   const curved = applyCurve(p, curveType);
-  return p + (curved - p) * amount;
+  return clamp(p + (curved - p) * amount, 0, 1);
 }
 
 function getTempoAt(elapsed, mode, startBpm, targetBpm, duration, curveAmount = 0, curveType = 'smoothstep') {
@@ -503,15 +504,15 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [pulse, setPulse] = useState(0);
-  const [toneLevel, setToneLevel] = useState(0);
   const [beatIndex, setBeatIndex] = useState(0);
   const tapTimes = useRef([]);
   const mainPanelRef = useRef(null);
   const toneBarRef = useRef(null);
-  const visualPitchPhase = useRef(0);
+  const toneTextRef = useRef(null);
   const visualFrameAt = useRef(0);
-  const toneReadoutAt = useRef(0);
+  const visualPitchPhase = useRef(0);
   const elapsedReadoutAt = useRef(0);
+  const pulseReadoutAt = useRef(0);
   const elapsedRef = useRef(0);
 
   const pattern = patterns.find((item) => item.id === patternId) ?? patterns[0];
@@ -562,7 +563,10 @@ function App() {
           setElapsed(nextElapsed);
         }
       }
-      setPulse((value) => value * 0.88);
+      if (now - pulseReadoutAt.current > 50) {
+        pulseReadoutAt.current = now;
+        setPulse((value) => value * 0.68);
+      }
       let nextToneLevel = 0;
       if (isRunning && isContinuousProfile(profileId)) {
         const bpm = getTempoAt(nextElapsed, mode, startBpm, targetBpm, duration, curveAmount, curveType);
@@ -576,10 +580,7 @@ function App() {
       const tonePercent = `${clampedTone * 100}%`;
       mainPanelRef.current?.style.setProperty('--tone-scale', clampedTone.toFixed(4));
       if (toneBarRef.current) toneBarRef.current.style.height = tonePercent;
-      if (now - toneReadoutAt.current > 80 || !isRunning) {
-        toneReadoutAt.current = now;
-        setToneLevel(nextToneLevel);
-      }
+      if (toneTextRef.current) toneTextRef.current.textContent = `${Math.round(clampedTone * 100)}%`;
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -667,7 +668,7 @@ function App() {
           </div>
 
           <div className="controlGroup">
-            <SliderRow label="Ramp Smoothness" value={curveAmount} min={0} max={100} accent="#9b8cff" onChange={setCurveAmount} display={curveAmount === 0 ? 'Straight' : `${curveAmount}%`} />
+            <SliderRow label="Ramp Smoothness" value={curveAmount} min={0} max={CURVE_AMOUNT_MAX} accent="#9b8cff" onChange={setCurveAmount} display={curveAmount === 0 ? 'Straight' : `${curveAmount}%`} />
             <div className="curveTypeGrid" aria-label="Curve type">
               {curveTypes.map((curve) => (
                 <button key={curve.id} className={curveType === curve.id ? 'active' : ''} onClick={() => setCurveType(curve.id)}>
@@ -728,14 +729,14 @@ function App() {
           <button className="resetButton" onClick={reset}>Reset Session</button>
         </aside>
 
-        <section className="mainPanel" ref={mainPanelRef}>
+        <section className={`mainPanel ${isRunning ? 'isRunning' : ''}`} ref={mainPanelRef}>
           <div className="statsStrip">
             <div><span>Elapsed</span><strong>{formatTime(elapsed)}</strong></div>
             <div><span>Phase</span><strong>{phase}</strong></div>
             <div><span>Remaining</span><strong>{formatTime(mode === 'linear' ? duration - elapsed : total - (elapsed % total))}</strong></div>
             <div className="toneStat">
               <span>Tone</span>
-              <strong>{Math.round(toneLevel * 100)}%</strong>
+              <strong ref={toneTextRef}>0%</strong>
               <i aria-hidden="true"><b ref={toneBarRef} /></i>
             </div>
           </div>

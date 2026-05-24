@@ -818,6 +818,10 @@ input[type="range"]::-webkit-slider-thumb {
     grid-template-rows: auto minmax(0, 1fr) auto auto;
   }
 
+  .mainPanel.isRunning > * {
+    opacity: 0.4;
+  }
+
   .dialPanel {
     min-height: 0;
   }
